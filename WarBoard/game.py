@@ -10,6 +10,14 @@ from constants import SCREEN_WIDTH, SCREEN_HEIGHT, FPS, WHITE, BLACK, LIGHT_GRAY
 from game_states import GameState
 from main_menu import MainMenu
 
+# Importar módulo The Resistance
+try:
+    from resistance_game import ResistanceGame, PlayerRole, MissionResult, Vote
+    RESISTANCE_AVAILABLE = True
+except ImportError:
+    RESISTANCE_AVAILABLE = False
+    print("Aviso: Módulo The Resistance não encontrado")
+
 
 class Game:
     """
@@ -32,6 +40,7 @@ class Game:
         self.classic_setup = ClassicSetupScreen(self.screen)
         self.classic_playing = ClassicPlayingScreen(self.screen)
         self.lobby_screen = LobbyScreen(self.screen)
+        self.classic_lobby = ClassicLobbyScreen(self.screen)
         self.classic_num_players = None
         
     def run(self):
@@ -72,7 +81,14 @@ class Game:
             elif self.state == GameState.SETTINGS:
                 self._handle_settings_events(event)
             elif self.state == GameState.LOBBY:
-                self._handle_lobby_events(event)
+                if hasattr(self, 'classic_num_players') and self.classic_num_players:
+                    self._handle_lobby_events(event)
+                else:
+                    action = self.lobby_screen.handle_event(event)
+                    if action == 'start_game':
+                        if getattr(self.lobby_screen, 'username', '').strip():
+                            self.classic_playing.set_username(self.lobby_screen.username.strip())
+                        self.state = GameState.PLAYING
     
     def _handle_menu_events(self, event):
         """
@@ -102,10 +118,21 @@ class Game:
         action = self.classic_setup.handle_event(event)
         if action and action.get('type') == 'start':
             self.classic_num_players = action['players']
-            self.classic_playing.start_new_game(self.classic_num_players)
-            self.state = GameState.PLAYING
+            self.classic_lobby.reset(self.classic_num_players)
+            self.state = GameState.LOBBY
         elif action and action.get('type') == 'back':
             self.state = GameState.MENU
+    
+    def _handle_lobby_events(self, event):
+        """
+        Processa eventos da tela de lobby do modo clássico
+        """
+        action = self.classic_lobby.handle_event(event)
+        if action == 'start_game':
+            self.classic_playing.start_new_game(self.classic_num_players)
+            self.state = GameState.PLAYING
+        elif action == 'back':
+            self.state = GameState.CLASSIC_SETUP
     
     def _handle_game_events(self, event):
         """
@@ -163,7 +190,11 @@ class Game:
             # Implementar desenho das configurações aqui
             pass
         elif self.state == GameState.LOBBY:
-            self.lobby_screen.draw()
+            # Verificar se é lobby do modo clássico ou lobby geral
+            if hasattr(self, 'classic_num_players') and self.classic_num_players:
+                self.classic_lobby.draw()
+            else:
+                self.lobby_screen.draw()
             
         pygame.display.flip()
 
@@ -253,6 +284,223 @@ class ClassicSetupScreen:
         self.screen.blit(back_txt, back_txt.get_rect(center=self.back_rect.center))
 
 
+class ClassicLobbyScreen:
+    """
+    Tela de lobby para o Modo Clássico (The Resistance)
+    - Tabuleiro/imagem central
+    - Chat para comunicação na lateral
+    - Botão para iniciar jogo quando todos estiverem prontos
+    """
+    def __init__(self, screen):
+        self.screen = screen
+        self.font_title = pygame.font.Font(None, 48)
+        self.font_text = pygame.font.Font(None, 40)
+        self.font_small = pygame.font.Font(None, 32)
+        self.font_chat_title = pygame.font.Font(None, 40)
+        self.font_chat_text = pygame.font.Font(None, 28)
+        self.num_players = 5
+        self.connected_players = []
+        self.chat_messages = []
+        self.chat_input = ""
+        self.chat_has_focus = False
+        self.username = "Jogador"
+        
+        # Layout
+        self.sidebar_width = 320
+        self.padding = 20
+        
+        # Tabuleiro
+        self.board_image = None
+        self._load_board_image()
+        
+        # Botões
+        self.start_rect = pygame.Rect(0, 0, 250, 60)
+        self.back_rect = pygame.Rect(0, 0, 200, 50)
+    
+    def reset(self, num_players):
+        """Reseta o lobby com número de jogadores"""
+        self.num_players = num_players
+        self.connected_players = [f"Jogador {i+1}" for i in range(num_players)]
+        self.chat_messages = []
+        self.chat_input = ""
+        self.chat_has_focus = False
+    
+    def handle_event(self, event):
+        """Processa eventos do lobby"""
+        sw = self.screen.get_width()
+        sh = self.screen.get_height()
+        
+        # Posicionar botões
+        self.start_rect.center = (sw // 2, sh - 100)
+        self.back_rect.center = (sw // 2, sh - 40)
+        
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            # Botão iniciar (no centro do tabuleiro)
+            layout = self._compute_layout()
+            board_rect = layout['board_rect']
+            center_x = board_rect.centerx
+            center_y = board_rect.centery
+            self.start_rect.center = (center_x, center_y)
+            
+            if self.start_rect.collidepoint(event.pos):
+                if len(self.connected_players) >= self.num_players:
+                    return 'start_game'
+            
+            # Chat input
+            chat_input_rect = layout['chat_input_rect']
+            self.chat_has_focus = chat_input_rect.collidepoint(event.pos)
+        
+        # Entrada de texto no chat
+        if event.type == pygame.KEYDOWN and self.chat_has_focus:
+            if event.key == pygame.K_RETURN:
+                text = self.chat_input.strip()
+                if text:
+                    self._append_message(f"{self.username}: {text}")
+                    self.chat_input = ""
+            elif event.key == pygame.K_BACKSPACE:
+                self.chat_input = self.chat_input[:-1]
+            else:
+                if event.unicode and len(self.chat_input) < 200 and ord(event.unicode) >= 32:
+                    self.chat_input += event.unicode
+        
+        return None
+    
+    def draw(self):
+        """Desenha a tela do lobby"""
+        # Fundo verde de feltro (como antes)
+        self.screen.fill((34, 139, 34))
+        
+        layout = self._compute_layout()
+        board_rect = layout['board_rect']
+        sidebar_rect = layout['sidebar_rect']
+        
+        # Tabuleiro (imagem ou placeholder)
+        if self.board_image:
+            scaled = pygame.transform.smoothscale(self.board_image, (board_rect.width, board_rect.height))
+            self.screen.blit(scaled, board_rect.topleft)
+            pygame.draw.rect(self.screen, BLACK, board_rect, 3)
+        else:
+            pygame.draw.rect(self.screen, (210, 180, 140), board_rect)
+            pygame.draw.rect(self.screen, BLACK, board_rect, 3)
+        
+        # Cabeçalho
+        header = self.font_title.render(
+            f"Sala de Espera - Jogadores: {len(self.connected_players)}/{self.num_players}", 
+            True, WHITE
+        )
+        self.screen.blit(header, (20, 20))
+        
+        # Botão Iniciar Jogo (centro do tabuleiro)
+        self._draw_start_button(board_rect)
+        
+        # Chat à direita
+        self._draw_chat_panel(sidebar_rect)
+        
+        # Lista de jogadores no tabuleiro
+        self._draw_players_on_board(board_rect)
+    
+    def _compute_layout(self):
+        """Calcula o layout da tela"""
+        left = self.padding
+        top = self.padding + 60  # espaço para o cabeçalho
+        usable_w = SCREEN_WIDTH - self.padding * 3 - self.sidebar_width
+        usable_h = SCREEN_HEIGHT - self.padding * 2
+        board_rect = pygame.Rect(left, top, usable_w, usable_h - top + self.padding)
+        sidebar_x = left + usable_w + self.padding
+        sidebar_rect = pygame.Rect(sidebar_x, self.padding, self.sidebar_width, SCREEN_HEIGHT - self.padding * 2)
+        # dentro do chat
+        input_h = 40
+        chat_input_rect = pygame.Rect(sidebar_rect.left + 12, sidebar_rect.bottom - input_h - 12, sidebar_rect.width - 24, input_h)
+        messages_rect = pygame.Rect(sidebar_rect.left + 12, sidebar_rect.top + 60, sidebar_rect.width - 24, sidebar_rect.height - 60 - input_h - 24)
+        return {
+            'board_rect': board_rect,
+            'sidebar_rect': sidebar_rect,
+            'chat_input_rect': chat_input_rect,
+            'messages_rect': messages_rect,
+        }
+    
+    def _draw_start_button(self, board_rect):
+        """Desenha o botão de iniciar jogo no centro do tabuleiro"""
+        center_x = board_rect.centerx
+        center_y = board_rect.centery
+        
+        self.start_rect.center = (center_x, center_y)
+        
+        if len(self.connected_players) >= self.num_players:
+            pygame.draw.rect(self.screen, (0, 200, 0), self.start_rect, border_radius=15)
+            pygame.draw.rect(self.screen, BLACK, self.start_rect, 3, border_radius=15)
+            start_text = self.font_text.render("INICIAR JOGO", True, WHITE)
+            self.screen.blit(start_text, start_text.get_rect(center=self.start_rect.center))
+        else:
+            pygame.draw.rect(self.screen, (100, 100, 100), self.start_rect, border_radius=15)
+            pygame.draw.rect(self.screen, BLACK, self.start_rect, 3, border_radius=15)
+            start_text = self.font_text.render(
+                f"Esperando ({len(self.connected_players)}/{self.num_players})", 
+                True, (200, 200, 200)
+            )
+            self.screen.blit(start_text, start_text.get_rect(center=self.start_rect.center))
+    
+    def _draw_players_on_board(self, board_rect):
+        """Desenha lista de jogadores no tabuleiro"""
+        y_pos = board_rect.top + 50
+        players_title = self.font_small.render("Jogadores Conectados:", True, WHITE)
+        self.screen.blit(players_title, (board_rect.left + 20, y_pos))
+        y_pos += 35
+        
+        for i, player in enumerate(self.connected_players):
+            color = (100, 255, 100) if i < len(self.connected_players) else (200, 200, 200)
+            player_text = self.font_small.render(f"• {player}", True, color)
+            self.screen.blit(player_text, (board_rect.left + 30, y_pos))
+            y_pos += 30
+    
+    def _draw_chat_panel(self, sidebar_rect):
+        """Desenha o painel de chat (igual ao que tinha antes)"""
+        pygame.draw.rect(self.screen, (245, 245, 245), sidebar_rect, border_radius=10)
+        pygame.draw.rect(self.screen, BLACK, sidebar_rect, 2, border_radius=10)
+        title = self.font_chat_title.render("Chat", True, BLACK)
+        self.screen.blit(title, title.get_rect(midtop=(sidebar_rect.centerx, sidebar_rect.top + 12)))
+
+        layout = self._compute_layout()
+        messages_rect = layout['messages_rect']
+        chat_input_rect = layout['chat_input_rect']
+
+        # Mensagens (mostra as últimas que cabem)
+        pygame.draw.rect(self.screen, WHITE, messages_rect)
+        pygame.draw.rect(self.screen, BLACK, messages_rect, 1)
+        max_lines = max(1, messages_rect.height // 22)
+        lines = self.chat_messages[-max_lines:]
+        y = messages_rect.top + 6
+        for msg in lines:
+            surface = self.font_chat_text.render(msg, True, BLACK)
+            self.screen.blit(surface, (messages_rect.left + 6, y))
+            y += 22
+
+        # Input
+        input_color = (255, 255, 255) if self.chat_has_focus else (245, 245, 245)
+        pygame.draw.rect(self.screen, input_color, chat_input_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BLACK, chat_input_rect, 1, border_radius=8)
+        txt = self.font_chat_text.render(self.chat_input or "Digite uma mensagem...", True, BLACK if self.chat_input else (120, 120, 120))
+        self.screen.blit(txt, (chat_input_rect.left + 8, chat_input_rect.top + 9))
+    
+    def _load_board_image(self):
+        """Carrega a imagem do tabuleiro"""
+        try:
+            self.board_image = pygame.image.load(BOARD_IMAGE_PATH).convert_alpha()
+        except Exception:
+            self.board_image = None
+    
+    def _get_chat_input_rect(self):
+        """Retorna o retângulo do input do chat"""
+        layout = self._compute_layout()
+        return layout['chat_input_rect']
+    
+    def _append_message(self, msg):
+        """Adiciona mensagem ao chat"""
+        self.chat_messages.append(msg)
+        if len(self.chat_messages) > 100:
+            self.chat_messages = self.chat_messages[-100:]
+
+
 class ClassicPlayingScreen:
     """
     Tela simples de jogo clássico com um tabuleiro genérico placeholder
@@ -295,6 +543,25 @@ class ClassicPlayingScreen:
         self.chat_messages = []
         self.chat_input = ""
         self.chat_has_focus = False
+        
+        # Inicializar jogo The Resistance
+        if RESISTANCE_AVAILABLE:
+            try:
+                self.resistance_game = ResistanceGame(num_players)
+                self.player_names = [f"Jogador {i+1}" for i in range(num_players)]
+                # Usar o primeiro jogador como o usuário atual
+                if self.username not in self.player_names:
+                    self.player_names[0] = self.username
+                self.resistance_game.alocar_papeis_jogadores(self.player_names)
+                self.selected_team = []
+                self._append_message(f"[Sistema] Jogo The Resistance iniciado com {num_players} jogadores!")
+            except Exception as e:
+                self._append_message(f"[Erro] Falha ao iniciar The Resistance: {e}")
+                self.resistance_game = None
+        else:
+            self.resistance_game = None
+            self.player_names = [f"Jogador {i+1}" for i in range(num_players)]
+        
         self._connect()
 
     def set_username(self, name: str):
@@ -311,6 +578,57 @@ class ClassicPlayingScreen:
                     return item['key']
         if self.is_paused:
             return None
+
+        # Eventos do jogo The Resistance
+        if hasattr(self, 'resistance_game') and self.resistance_game is not None:
+            try:
+                estado = self.resistance_game.obter_estado_jogo()
+                
+                if event.type == pygame.MOUSEBUTTONDOWN and not estado['game_over']:
+                    layout = self._compute_layout()
+                    main_rect = layout['board_rect']
+                    
+                    # Verificar se clicou nos botões de voto
+                    if estado['current_mission_team']:
+                        y_pos = main_rect.top + 350
+                        approve_rect = pygame.Rect(main_rect.left + 20, y_pos, 150, 40)
+                        reject_rect = pygame.Rect(main_rect.left + 180, y_pos, 150, 40)
+                        
+                        if approve_rect.collidepoint(event.pos):
+                            self.resistance_game.votar_proposta_time(self.username, Vote.APPROVE)
+                            resultado = self.resistance_game.gerenciar_ciclo_votacao_time()
+                            self._append_message(f"[Sistema] {resultado['message']}")
+                            
+                        elif reject_rect.collidepoint(event.pos):
+                            self.resistance_game.votar_proposta_time(self.username, Vote.REJECT)
+                            resultado = self.resistance_game.gerenciar_ciclo_votacao_time()
+                            self._append_message(f"[Sistema] {resultado['message']}")
+                            
+                            if resultado['status'] == 'time_rejeitado':
+                                self.selected_team = []
+                    
+                    # Verificar se é o líder e pode propor time
+                    if estado['current_leader'] == self.username and not estado['current_mission_team']:
+                        y_pos = main_rect.top + 200
+                        for i, player in enumerate(self.player_names):
+                            player_rect = pygame.Rect(main_rect.left + 30, y_pos + i * 25, 200, 25)
+                            if player_rect.collidepoint(event.pos):
+                                if player in self.selected_team:
+                                    self.selected_team.remove(player)
+                                else:
+                                    mission_config = estado['mission_config']
+                                    if len(self.selected_team) < mission_config['mission_size']:
+                                        self.selected_team.append(player)
+                        
+                        # Botão para confirmar time
+                        confirm_y = y_pos + len(self.player_names) * 25 + 20
+                        confirm_rect = pygame.Rect(main_rect.left + 20, confirm_y, 200, 40)
+                        if confirm_rect.collidepoint(event.pos) and len(self.selected_team) == estado['mission_config']['mission_size']:
+                            if self.resistance_game.selecionar_time_missao(self.username, self.selected_team):
+                                self._append_message(f"[Sistema] Time proposto: {', '.join(self.selected_team)}")
+                                self.selected_team = []
+            except Exception:
+                pass  # Se houver erro, continuar normalmente
 
         # Eventos do chat
         layout = self._compute_layout()
@@ -361,16 +679,150 @@ class ClassicPlayingScreen:
                 y = board_rect.top + r * cell_h
                 pygame.draw.line(self.screen, BLACK, (board_rect.left, y), (board_rect.right, y), 1)
 
-        # Cabeçalho com número de jogadores
-        header = self.font_title.render(f"Jogo Clássico - Jogadores: {self.num_players}", True, WHITE)
-        self.screen.blit(header, (20, 20))
+        # Verificar se The Resistance está ativo
+        if hasattr(self, 'resistance_game') and self.resistance_game is not None:
+            # Desenhar interface do The Resistance
+            self._draw_resistance_game(board_rect)
+        else:
+            # Cabeçalho padrão
+            header = self.font_title.render(f"Jogo Clássico - Jogadores: {self.num_players}", True, WHITE)
+            self.screen.blit(header, (20, 20))
 
         # Painel de chat à direita
         self._draw_chat_panel(sidebar_rect)
 
         if self.is_paused:
             self._draw_pause_menu()
-
+    
+    def _draw_resistance_game(self, main_rect):
+        """Desenha a interface do jogo The Resistance"""
+        font_title = pygame.font.Font(None, 56)
+        font_large = pygame.font.Font(None, 42)
+        font_medium = pygame.font.Font(None, 32)
+        font_small = pygame.font.Font(None, 24)
+        
+        # Título
+        title = font_title.render("THE RESISTANCE", True, WHITE)
+        self.screen.blit(title, (main_rect.left + 20, main_rect.top + 20))
+        
+        # Estado do jogo
+        try:
+            estado = self.resistance_game.obter_estado_jogo()
+        except Exception as e:
+            error_text = font_medium.render(f"Erro: {str(e)}", True, (255, 0, 0))
+            self.screen.blit(error_text, (main_rect.left + 20, main_rect.top + 100))
+            return
+        
+        y_pos = main_rect.top + 90
+        
+        # Informações gerais
+        mission_info = font_medium.render(f"Missão {estado['mission_number']}/5", True, WHITE)
+        self.screen.blit(mission_info, (main_rect.left + 20, y_pos))
+        
+        y_pos += 35
+        leader_info = font_medium.render(f"Líder: {estado['current_leader']}", True, (255, 215, 0))
+        self.screen.blit(leader_info, (main_rect.left + 20, y_pos))
+        
+        y_pos += 35
+        score_info = font_medium.render(f"Sucessos: {estado['success_count']} | Falhas: {estado['failure_count']}", True, WHITE)
+        self.screen.blit(score_info, (main_rect.left + 20, y_pos))
+        
+        # Verificar se o jogo terminou
+        if estado['game_over']:
+            y_pos += 50
+            winner_text = "RESISTÊNCIA VENCEU!" if estado['winner'] == "Resistência" else "ESPIÕES VENCERAM!"
+            winner_color = (0, 255, 0) if estado['winner'] == "Resistência" else (255, 0, 0)
+            winner_surface = font_large.render(winner_text, True, winner_color)
+            self.screen.blit(winner_surface, (main_rect.left + 20, y_pos))
+            return
+        
+        y_pos += 50
+        
+        # Lista de jogadores
+        players_title = font_medium.render("Jogadores:", True, WHITE)
+        self.screen.blit(players_title, (main_rect.left + 20, y_pos))
+        y_pos += 35
+        
+        for i, player in enumerate(self.player_names):
+            role = self.resistance_game.definir_papel_jogador(player)
+            role_text = "Espião" if role == PlayerRole.SPY else "Resistência"
+            role_color = (255, 100, 100) if role == PlayerRole.SPY else (100, 255, 100)
+            
+            # Marcar se está selecionado
+            marker = "[X] " if hasattr(self, 'selected_team') and player in self.selected_team else "[ ] "
+            if player == self.username:
+                marker += "VOCÊ - "
+            
+            player_text = font_small.render(f"{marker}{player}: {role_text}", True, role_color)
+            self.screen.blit(player_text, (main_rect.left + 30, y_pos))
+            y_pos += 25
+        
+        y_pos += 20
+        
+        # Configuração da missão atual
+        if estado['mission_config']:
+            config = estado['mission_config']
+            mission_size_text = font_medium.render(
+                f"Time necessário: {config['mission_size']} jogadores", True, WHITE
+            )
+            self.screen.blit(mission_size_text, (main_rect.left + 20, y_pos))
+            y_pos += 35
+            
+            fails_text = font_medium.render(
+                f"Falhas para sabotar: {config['fails_needed']}", True, (255, 200, 0)
+            )
+            self.screen.blit(fails_text, (main_rect.left + 20, y_pos))
+            y_pos += 50
+        
+        # Time proposto
+        if estado['current_mission_team']:
+            team_title = font_medium.render("Time Proposto:", True, WHITE)
+            self.screen.blit(team_title, (main_rect.left + 20, y_pos))
+            y_pos += 35
+            
+            for player in estado['current_mission_team']:
+                team_text = font_small.render(f"• {player}", True, WHITE)
+                self.screen.blit(team_text, (main_rect.left + 30, y_pos))
+                y_pos += 25
+            
+            y_pos += 20
+            
+            # Botões de voto (se ainda não votou)
+            if not estado['leader_votes'] or self.username not in estado['leader_votes']:
+                approve_rect = pygame.Rect(main_rect.left + 20, y_pos, 150, 40)
+                reject_rect = pygame.Rect(main_rect.left + 180, y_pos, 150, 40)
+                
+                pygame.draw.rect(self.screen, (0, 200, 0), approve_rect, border_radius=8)
+                pygame.draw.rect(self.screen, (200, 0, 0), reject_rect, border_radius=8)
+                
+                approve_text = font_small.render("Aprovar", True, WHITE)
+                reject_text = font_small.render("Rejeitar", True, WHITE)
+                
+                self.screen.blit(approve_text, (approve_rect.centerx - 40, approve_rect.centery - 10))
+                self.screen.blit(reject_text, (reject_rect.centerx - 40, reject_rect.centery - 10))
+        
+        # Botão de confirmar time (se líder está selecionando)
+        if estado['current_leader'] == self.username and not estado['current_mission_team']:
+            y_pos_confirm = main_rect.top + 200 + len(self.player_names) * 25 + 20
+            if hasattr(self, 'selected_team') and len(self.selected_team) == estado['mission_config']['mission_size']:
+                confirm_rect = pygame.Rect(main_rect.left + 20, y_pos_confirm, 200, 40)
+                pygame.draw.rect(self.screen, (0, 150, 255), confirm_rect, border_radius=8)
+                confirm_text = font_small.render("Confirmar Time", True, WHITE)
+                self.screen.blit(confirm_text, (confirm_rect.centerx - 60, confirm_rect.centery - 10))
+        
+        # Histórico de missões
+        if estado['mission_results']:
+            y_pos = main_rect.bottom - 100
+            history_title = font_medium.render("Histórico:", True, WHITE)
+            self.screen.blit(history_title, (main_rect.left + 20, y_pos))
+            y_pos += 30
+            
+            for i, result in enumerate(estado['mission_results'], 1):
+                result_color = (0, 255, 0) if result == "Sucesso" else (255, 0, 0)
+                result_text = font_small.render(f"Missão {i}: {result}", True, result_color)
+                self.screen.blit(result_text, (main_rect.left + 30, y_pos))
+                y_pos += 20
+    
     def _load_board_image(self):
         try:
             self.board_image = pygame.image.load(BOARD_IMAGE_PATH).convert_alpha()
