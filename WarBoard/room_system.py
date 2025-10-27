@@ -126,3 +126,4 @@ class RoomSystem:
         """Remove salas antigas (para limpeza)"""
         # TODO: Implementar limpeza de salas antigas
         pass
+

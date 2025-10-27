@@ -113,3 +113,4 @@ Settings System (Configurações)
 - **Observer**: Sistemas notificam mudanças de estado
 - **Factory**: Criação de componentes de UI
 - **State Machine**: Gerenciamento de estados do jogo
+

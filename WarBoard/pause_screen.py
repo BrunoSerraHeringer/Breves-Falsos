@@ -123,3 +123,4 @@ class PauseScreen:
             text_rect = text.get_rect(center=(screen_w // 2, y_offset))
             self.screen.blit(text, text_rect)
             y_offset += 30
+

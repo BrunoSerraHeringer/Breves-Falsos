@@ -231,3 +231,4 @@ class ResistanceSystem:
             'game_over': False,
             'winner': None
         }
+
