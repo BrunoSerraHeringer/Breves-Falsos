@@ -13,9 +13,11 @@ WHITE = (255, 255, 255)
 DARK_BLUE = (25, 25, 112)
 LIGHT_BLUE = (70, 130, 180)
 RED = (220, 20, 60)
+GREEN = (0, 255, 0)
 GOLD = (255, 215, 0)
 GRAY = (128, 128, 128)
 LIGHT_GRAY = (200, 200, 200)
+DARK_GRAY = (64, 64, 64)
 
 # Caminhos de assets
 BACKGROUND_IMAGE_PATH = "WarBoard_assets/army_background.jpg"

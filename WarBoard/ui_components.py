@@ -42,7 +42,7 @@ class Button:
         
         # Desenhar botão com bordas arredondadas
         pygame.draw.rect(screen, current_color, self.rect, border_radius=10)
-        pygame.draw.rect(screen, BLACK, self.rect, width=3, border_radius=10)
+        pygame.draw.rect(screen, BLACK, self.rect, 3, border_radius=10)
         
         # Desenhar texto centralizado
         text_surface = self.font.render(self.text, True, self.text_color)

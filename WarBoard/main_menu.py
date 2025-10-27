@@ -62,11 +62,11 @@ class MainMenu:
         return {
             'jogo_classico': Button(
                 button_x, start_y, button_width, button_height,
-                'JOGO CLÁSSICO', self.font_button, GOLD, WHITE
+                'THE RESISTANCE', self.font_button, GOLD, WHITE
             ),
             'jogo_estendido': Button(
                 button_x, start_y + spacing, button_width, button_height,
-                'JOGO ESTENDIDO', self.font_button, GOLD, WHITE
+                'THE COUNCIL', self.font_button, GOLD, WHITE
             ),
             'configuracoes': Button(
                 button_x, start_y + spacing * 2, button_width, button_height,
@@ -119,6 +119,12 @@ class MainMenu:
         dev_rect = dev_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 30))
         self.screen.blit(dev_text, dev_rect)
     
+    def _draw_controls(self):
+        """Desenha controles"""
+        # Controles no canto inferior esquerdo
+        controls_text = pygame.font.Font(None, 24).render("F11: Fullscreen | ESC: Configurações", True, (200, 200, 200))
+        self.screen.blit(controls_text, (20, SCREEN_HEIGHT - 60))
+    
     def draw(self):
         """
         Desenha o menu principal completo
@@ -138,6 +144,9 @@ class MainMenu:
         
         # Rodapé
         self._draw_footer()
+        
+        # Controles
+        self._draw_controls()
         
     def handle_event(self, event):
         """

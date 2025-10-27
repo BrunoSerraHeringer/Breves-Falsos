@@ -9,6 +9,10 @@ import threading
 from constants import SCREEN_WIDTH, SCREEN_HEIGHT, FPS, WHITE, BLACK, LIGHT_GRAY, BOARD_IMAGE_PATH, BASE_ROOM_URL, SERVER_HOST, SERVER_PORT
 from game_states import GameState
 from main_menu import MainMenu
+from settings_screen import SettingsScreen
+from room_menu_screen import RoomMenuScreen
+from create_room_screen import CreateRoomScreen
+from player_name_screen import PlayerNameScreen
 
 # Importar módulo The Resistance
 try:
@@ -37,11 +41,17 @@ class Game:
         
         # Inicializar telas
         self.main_menu = MainMenu(self.screen)
+        self.settings_screen = SettingsScreen(self.screen)
+        self.room_menu = RoomMenuScreen(self.screen)
+        self.create_room = CreateRoomScreen(self.screen)
+        self.player_name = PlayerNameScreen(self.screen)
         self.classic_setup = ClassicSetupScreen(self.screen)
         self.classic_playing = ClassicPlayingScreen(self.screen)
         self.lobby_screen = LobbyScreen(self.screen)
         self.classic_lobby = ClassicLobbyScreen(self.screen)
         self.classic_num_players = None
+        self.player_username = "Jogador"
+        self.room_code = ""
         
     def run(self):
         """
@@ -80,8 +90,17 @@ class Game:
                 self._handle_game_events(event)
             elif self.state == GameState.SETTINGS:
                 self._handle_settings_events(event)
+            elif self.state == GameState.ROOM_MENU:
+                self._handle_room_menu_events(event)
+            elif self.state == GameState.CREATE_ROOM:
+                self._handle_create_room_events(event)
+            elif self.state == GameState.PLAYER_NAME:
+                self._handle_player_name_events(event)
             elif self.state == GameState.LOBBY:
-                if hasattr(self, 'classic_num_players') and self.classic_num_players:
+                # Verificar se ESC foi pressionado para abrir configurações
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    self.state = GameState.SETTINGS
+                elif hasattr(self, 'classic_num_players') and self.classic_num_players:
                     self._handle_lobby_events(event)
                 else:
                     action = self.lobby_screen.handle_event(event)
@@ -100,14 +119,12 @@ class Game:
         button_clicked = self.main_menu.handle_event(event)
         
         if button_clicked == 'jogo_classico':
-            self.classic_setup.reset()
-            self.state = GameState.CLASSIC_SETUP
+            self.state = GameState.ROOM_MENU
         elif button_clicked == 'jogo_estendido':
-            print("Iniciando Jogo Estendido...")  # Placeholder
+            print("Iniciando THE COUNCIL...")  # Placeholder
             # self.state = GameState.PLAYING  # Implementar depois
         elif button_clicked == 'configuracoes':
-            print("Abrindo configurações...")  # Placeholder
-            # self.state = GameState.SETTINGS  # Implementar depois
+            self.state = GameState.SETTINGS
         elif button_clicked == 'sair':
             self.running = False
 
@@ -127,6 +144,11 @@ class Game:
         """
         Processa eventos da tela de lobby do modo clássico
         """
+        # Verificar se ESC foi pressionado para abrir configurações
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.state = GameState.SETTINGS
+            return
+        
         action = self.classic_lobby.handle_event(event)
         if action == 'start_game':
             self.classic_playing.start_new_game(self.classic_num_players)
@@ -152,8 +174,8 @@ class Game:
             self.classic_playing._disconnect()
             self.lobby_screen.reset()
             self.state = GameState.LOBBY
-        elif action == 'toggle_fullscreen':
-            self._toggle_fullscreen()
+        elif action == 'open_settings':
+            self.state = GameState.SETTINGS
     
     def _handle_settings_events(self, event):
         """
@@ -162,8 +184,55 @@ class Game:
         Args:
             event: Evento do pygame
         """
-        # Implementar lógica de eventos das configurações aqui
-        pass
+        action = self.settings_screen.handle_event(event)
+        if action == 'apply_settings':
+            self._apply_settings()
+        elif action == 'back':
+            # Voltar para a tela anterior (menu ou lobby)
+            if hasattr(self, 'classic_num_players') and self.classic_num_players:
+                self.state = GameState.LOBBY  # Voltar para lobby do modo clássico
+            else:
+                self.state = GameState.MENU   # Voltar para menu principal
+    
+    def _handle_room_menu_events(self, event):
+        """
+        Processa eventos do menu de salas
+        """
+        action = self.room_menu.handle_event(event)
+        if action == 'create_room':
+            self.state = GameState.CREATE_ROOM
+        elif action == 'join_room':
+            # Por enquanto, redireciona para criação de sala
+            # TODO: Implementar entrada em sala existente
+            self.state = GameState.CREATE_ROOM
+        elif action == 'back':
+            self.state = GameState.MENU
+    
+    def _handle_create_room_events(self, event):
+        """
+        Processa eventos da tela de criação de sala
+        """
+        action = self.create_room.handle_event(event)
+        if action == 'create_room':
+            self.classic_num_players = self.create_room.players
+            self.state = GameState.PLAYER_NAME
+        elif action == 'back':
+            self.state = GameState.ROOM_MENU
+    
+    def _handle_player_name_events(self, event):
+        """
+        Processa eventos da tela de nome do jogador
+        """
+        action = self.player_name.handle_event(event)
+        if action == 'confirm':
+            self.player_username = self.player_name.player_name.strip() or "Jogador"
+            self.room_code = self._generate_room_code()
+            self.classic_lobby.reset(self.classic_num_players)
+            self.classic_lobby.set_player_name(self.player_username)
+            self.classic_lobby.set_room_code(self.room_code)
+            self.state = GameState.LOBBY
+        elif action == 'back':
+            self.state = GameState.CREATE_ROOM
                     
     def update(self):
         """
@@ -182,13 +251,18 @@ class Game:
         """
         if self.state == GameState.MENU:
             self.main_menu.draw()
+        elif self.state == GameState.ROOM_MENU:
+            self.room_menu.draw()
+        elif self.state == GameState.CREATE_ROOM:
+            self.create_room.draw()
+        elif self.state == GameState.PLAYER_NAME:
+            self.player_name.draw()
         elif self.state == GameState.CLASSIC_SETUP:
             self.classic_setup.draw()
         elif self.state == GameState.PLAYING:
             self.classic_playing.draw()
         elif self.state == GameState.SETTINGS:
-            # Implementar desenho das configurações aqui
-            pass
+            self.settings_screen.draw()
         elif self.state == GameState.LOBBY:
             # Verificar se é lobby do modo clássico ou lobby geral
             if hasattr(self, 'classic_num_players') and self.classic_num_players:
@@ -210,6 +284,49 @@ class Game:
         self.classic_setup.screen = self.screen
         self.classic_playing.screen = self.screen
         self.lobby_screen.screen = self.screen
+    
+    def _resize_screen(self, width, height):
+        """Redimensiona a tela para o tamanho especificado"""
+        if not self.is_fullscreen:
+            self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
+            # Propagar nova surface para telas
+            self.main_menu.screen = self.screen
+            self.settings_screen.screen = self.screen
+            self.classic_setup.screen = self.screen
+            self.classic_playing.screen = self.screen
+            self.lobby_screen.screen = self.screen
+            self.classic_lobby.screen = self.screen
+    
+    def _apply_settings(self):
+        """Aplica as configurações selecionadas"""
+        settings = self.settings_screen.get_current_settings()
+        
+        if settings['fullscreen']:
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self.is_fullscreen = True
+        else:
+            self.screen = pygame.display.set_mode((settings['width'], settings['height']), pygame.RESIZABLE)
+            self.is_fullscreen = False
+        
+        # Propagar nova surface para todas as telas
+        self.main_menu.screen = self.screen
+        self.settings_screen.screen = self.screen
+        self.room_menu.screen = self.screen
+        self.create_room.screen = self.screen
+        self.player_name.screen = self.screen
+        self.classic_setup.screen = self.screen
+        self.classic_playing.screen = self.screen
+        self.lobby_screen.screen = self.screen
+        self.classic_lobby.screen = self.screen
+        
+        # Atualizar layout das configurações
+        self.settings_screen.update_layout()
+    
+    def _generate_room_code(self):
+        """Gera um código de sala aleatório de 5 caracteres"""
+        import random
+        import string
+        return ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
 
     def _handle_lobby_events(self, event):
         action = self.lobby_screen.handle_event(event)
@@ -222,7 +339,7 @@ class Game:
 
 class ClassicSetupScreen:
     """
-    Tela de configuração do Modo Clássico
+    Tela de configuração do THE RESISTANCE
     - Seleção de número de jogadores (5 a 10)
     - Botões para Iniciar e Voltar
     """
@@ -256,7 +373,7 @@ class ClassicSetupScreen:
 
     def draw(self):
         self.screen.fill(WHITE)
-        title = self.font_title.render("Modo Clássico", True, BLACK)
+        title = self.font_title.render("THE RESISTANCE", True, BLACK)
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 120)))
 
         subtitle = self.font_text.render("Selecione o número de jogadores", True, BLACK)
@@ -286,7 +403,7 @@ class ClassicSetupScreen:
 
 class ClassicLobbyScreen:
     """
-    Tela de lobby para o Modo Clássico (The Resistance)
+    Tela de lobby para THE RESISTANCE
     - Tabuleiro/imagem central
     - Chat para comunicação na lateral
     - Botão para iniciar jogo quando todos estiverem prontos
@@ -304,6 +421,7 @@ class ClassicLobbyScreen:
         self.chat_input = ""
         self.chat_has_focus = False
         self.username = "Jogador"
+        self.room_code = ""
         
         # Layout
         self.sidebar_width = 320
@@ -324,6 +442,16 @@ class ClassicLobbyScreen:
         self.chat_messages = []
         self.chat_input = ""
         self.chat_has_focus = False
+    
+    def set_player_name(self, name):
+        """Define o nome do jogador"""
+        self.username = name
+        if self.connected_players:
+            self.connected_players[0] = name
+    
+    def set_room_code(self, code):
+        """Define o código da sala"""
+        self.room_code = code
     
     def handle_event(self, event):
         """Processa eventos do lobby"""
@@ -346,12 +474,17 @@ class ClassicLobbyScreen:
                 if len(self.connected_players) >= self.num_players:
                     return 'start_game'
             
-            # Chat input
-            chat_input_rect = layout['chat_input_rect']
-            self.chat_has_focus = chat_input_rect.collidepoint(event.pos)
-        
         # Entrada de texto no chat
-        if event.type == pygame.KEYDOWN and self.chat_has_focus:
+        layout = self._compute_layout()
+        chat_input_rect = layout['chat_input_rect']
+        
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            # Verificar se clicou no campo de chat
+            if chat_input_rect.collidepoint(event.pos):
+                self.chat_has_focus = True
+            else:
+                self.chat_has_focus = False
+        elif event.type == pygame.KEYDOWN and self.chat_has_focus:
             if event.key == pygame.K_RETURN:
                 text = self.chat_input.strip()
                 if text:
@@ -390,6 +523,12 @@ class ClassicLobbyScreen:
         )
         self.screen.blit(header, (20, 20))
         
+        # Código da sala (acima da imagem do tabuleiro)
+        if self.room_code:
+            code_text = self.font_text.render(f"Código da Sala: {self.room_code}", True, GOLD)
+            code_rect = code_text.get_rect(center=(board_rect.centerx, board_rect.top - 30))
+            self.screen.blit(code_text, code_rect)
+        
         # Botão Iniciar Jogo (centro do tabuleiro)
         self._draw_start_button(board_rect)
         
@@ -398,16 +537,28 @@ class ClassicLobbyScreen:
         
         # Lista de jogadores no tabuleiro
         self._draw_players_on_board(board_rect)
+        
+        # Controles (acima do chat)
+        layout = self._compute_layout()
+        sidebar_rect = layout['sidebar_rect']
+        controls_y = sidebar_rect.top - 30
+        controls_text = self.font_small.render("ESC: Configurações", True, (200, 200, 200))
+        self.screen.blit(controls_text, (sidebar_rect.left, controls_y))
     
     def _compute_layout(self):
         """Calcula o layout da tela"""
+        # Usar dimensões atuais da tela em vez de constantes fixas
+        screen_w = self.screen.get_width()
+        screen_h = self.screen.get_height()
+        
         left = self.padding
         top = self.padding + 60  # espaço para o cabeçalho
-        usable_w = SCREEN_WIDTH - self.padding * 3 - self.sidebar_width
-        usable_h = SCREEN_HEIGHT - self.padding * 2
+        sidebar_width = min(320, screen_w // 4)  # Sidebar responsivo
+        usable_w = screen_w - self.padding * 3 - sidebar_width
+        usable_h = screen_h - self.padding * 2
         board_rect = pygame.Rect(left, top, usable_w, usable_h - top + self.padding)
         sidebar_x = left + usable_w + self.padding
-        sidebar_rect = pygame.Rect(sidebar_x, self.padding, self.sidebar_width, SCREEN_HEIGHT - self.padding * 2)
+        sidebar_rect = pygame.Rect(sidebar_x, self.padding, sidebar_width, screen_h - self.padding * 2)
         # dentro do chat
         input_h = 40
         chat_input_rect = pygame.Rect(sidebar_rect.left + 12, sidebar_rect.bottom - input_h - 12, sidebar_rect.width - 24, input_h)
@@ -449,7 +600,11 @@ class ClassicLobbyScreen:
         
         for i, player in enumerate(self.connected_players):
             color = (100, 255, 100) if i < len(self.connected_players) else (200, 200, 200)
-            player_text = self.font_small.render(f"• {player}", True, color)
+            # Destacar o nome do jogador atual
+            if i == 0 and player == self.username:
+                player_text = self.font_small.render(f"• {player} (Você)", True, (255, 255, 100))
+            else:
+                player_text = self.font_small.render(f"• {player}", True, color)
             self.screen.blit(player_text, (board_rect.left + 30, y_pos))
             y_pos += 30
     
@@ -503,7 +658,7 @@ class ClassicLobbyScreen:
 
 class ClassicPlayingScreen:
     """
-    Tela simples de jogo clássico com um tabuleiro genérico placeholder
+    Tela de jogo THE RESISTANCE com tabuleiro e interface completa
     """
     def __init__(self, screen):
         self.screen = screen
@@ -511,10 +666,10 @@ class ClassicPlayingScreen:
         self.num_players = 0
         self.is_paused = False
         self.menu_items = [
+            { 'key': 'open_settings', 'label': 'Configurações' },
             { 'key': 'exit_game', 'label': 'Sair do jogo' },
             { 'key': 'invite_friends', 'label': 'Convidar amigos' },
             { 'key': 'back_to_menu', 'label': 'Voltar ao menu principal' },
-            { 'key': 'toggle_fullscreen', 'label': 'Alternar tela cheia' },
         ]
         self.menu_rects = []
         self.board_image = None
@@ -570,8 +725,8 @@ class ClassicPlayingScreen:
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            self.is_paused = not self.is_paused
-            return None
+            return 'open_settings'
+        
         if self.is_paused and event.type == pygame.MOUSEBUTTONDOWN:
             for rect, item in self.menu_rects:
                 if rect.collidepoint(event.pos):
@@ -598,6 +753,11 @@ class ClassicPlayingScreen:
                             self.resistance_game.votar_proposta_time(self.username, Vote.APPROVE)
                             resultado = self.resistance_game.gerenciar_ciclo_votacao_time()
                             self._append_message(f"[Sistema] {resultado['message']}")
+                            
+                            # Se time foi aprovado, iniciar execução da missão
+                            if resultado['status'] == 'time_aprovado':
+                                self._append_message("[Sistema] Time aprovado! Iniciando execução da missão...")
+                                self._start_mission_execution()
                             
                         elif reject_rect.collidepoint(event.pos):
                             self.resistance_game.votar_proposta_time(self.username, Vote.REJECT)
@@ -627,13 +787,38 @@ class ClassicPlayingScreen:
                             if self.resistance_game.selecionar_time_missao(self.username, self.selected_team):
                                 self._append_message(f"[Sistema] Time proposto: {', '.join(self.selected_team)}")
                                 self.selected_team = []
+                    
+                    # Verificar cliques nos botões de execução da missão
+                    if estado['current_mission_team'] and not estado['mission_votes'] and self.username in estado['current_mission_team']:
+                        y_pos = main_rect.top + 440
+                        success_rect = pygame.Rect(main_rect.left + 20, y_pos, 150, 40)
+                        fail_rect = pygame.Rect(main_rect.left + 180, y_pos, 150, 40)
+                        
+                        if success_rect.collidepoint(event.pos):
+                            self.resistance_game.executar_missao(self.username, MissionResult.SUCCESS)
+                            self._append_message(f"[Sistema] {self.username} votou: Sucesso")
+                            self._check_mission_completion()
+                        elif fail_rect.collidepoint(event.pos):
+                            # Verificar se é espião (apenas espiões podem votar falha)
+                            if self.resistance_game.eh_espiao(self.username):
+                                self.resistance_game.executar_missao(self.username, MissionResult.FAILURE)
+                                self._append_message(f"[Sistema] {self.username} votou: Falha")
+                                self._check_mission_completion()
+                            else:
+                                self._append_message("[Sistema] Apenas espiões podem votar falha!")
             except Exception:
                 pass  # Se houver erro, continuar normalmente
 
         # Eventos do chat
         layout = self._compute_layout()
+        chat_input_rect = layout['chat_input_rect']
+        
         if event.type == pygame.MOUSEBUTTONDOWN:
-            self.chat_has_focus = layout['chat_input_rect'].collidepoint(event.pos)
+            # Verificar se clicou no campo de chat
+            if chat_input_rect.collidepoint(event.pos):
+                self.chat_has_focus = True
+            else:
+                self.chat_has_focus = False
         elif event.type == pygame.KEYDOWN and self.chat_has_focus:
             if event.key == pygame.K_RETURN:
                 text = self.chat_input.strip()
@@ -685,7 +870,7 @@ class ClassicPlayingScreen:
             self._draw_resistance_game(board_rect)
         else:
             # Cabeçalho padrão
-            header = self.font_title.render(f"Jogo Clássico - Jogadores: {self.num_players}", True, WHITE)
+            header = self.font_title.render(f"THE RESISTANCE - Jogadores: {self.num_players}", True, WHITE)
             self.screen.blit(header, (20, 20))
 
         # Painel de chat à direita
@@ -810,6 +995,30 @@ class ClassicPlayingScreen:
                 confirm_text = font_small.render("Confirmar Time", True, WHITE)
                 self.screen.blit(confirm_text, (confirm_rect.centerx - 60, confirm_rect.centery - 10))
         
+        # Interface de execução da missão
+        if estado['current_mission_team'] and not estado['mission_votes']:
+            y_pos = main_rect.top + 400
+            mission_title = font_medium.render("EXECUTAR MISSÃO", True, (255, 255, 0))
+            self.screen.blit(mission_title, (main_rect.left + 20, y_pos))
+            y_pos += 40
+            
+            # Verificar se o jogador está no time da missão
+            if self.username in estado['current_mission_team']:
+                success_rect = pygame.Rect(main_rect.left + 20, y_pos, 150, 40)
+                fail_rect = pygame.Rect(main_rect.left + 180, y_pos, 150, 40)
+                
+                pygame.draw.rect(self.screen, (0, 200, 0), success_rect, border_radius=8)
+                pygame.draw.rect(self.screen, (200, 0, 0), fail_rect, border_radius=8)
+                
+                success_text = font_small.render("Sucesso", True, WHITE)
+                fail_text = font_small.render("Falha", True, WHITE)
+                
+                self.screen.blit(success_text, (success_rect.centerx - 30, success_rect.centery - 10))
+                self.screen.blit(fail_text, (fail_rect.centerx - 25, fail_rect.centery - 10))
+            else:
+                waiting_text = font_medium.render("Aguardando outros jogadores...", True, (255, 255, 0))
+                self.screen.blit(waiting_text, (main_rect.left + 20, y_pos))
+        
         # Histórico de missões
         if estado['mission_results']:
             y_pos = main_rect.bottom - 100
@@ -822,6 +1031,13 @@ class ClassicPlayingScreen:
                 result_text = font_small.render(f"Missão {i}: {result}", True, result_color)
                 self.screen.blit(result_text, (main_rect.left + 30, y_pos))
                 y_pos += 20
+        
+        # Controles de tela (acima do chat)
+        layout = self._compute_layout()
+        sidebar_rect = layout['sidebar_rect']
+        controls_y = sidebar_rect.top - 30
+        controls_text = font_small.render("ESC: Configurações", True, (200, 200, 200))
+        self.screen.blit(controls_text, (sidebar_rect.left, controls_y))
     
     def _load_board_image(self):
         try:
@@ -870,13 +1086,18 @@ class ClassicPlayingScreen:
             self.menu_rects.append((r, item))
 
     def _compute_layout(self):
+        # Usar dimensões atuais da tela em vez de constantes fixas
+        screen_w = self.screen.get_width()
+        screen_h = self.screen.get_height()
+        
         left = self.padding
         top = self.padding + 60  # espaço para o cabeçalho
-        usable_w = SCREEN_WIDTH - self.padding * 3 - self.sidebar_width
-        usable_h = SCREEN_HEIGHT - self.padding * 2
+        sidebar_width = max(250, min(320, screen_w // 4))  # Sidebar responsivo com mínimo
+        usable_w = max(400, screen_w - self.padding * 3 - sidebar_width)  # Garantir largura mínima
+        usable_h = screen_h - self.padding * 2
         board_rect = pygame.Rect(left, top, usable_w, usable_h - top + self.padding)
         sidebar_x = left + usable_w + self.padding
-        sidebar_rect = pygame.Rect(sidebar_x, self.padding, self.sidebar_width, SCREEN_HEIGHT - self.padding * 2)
+        sidebar_rect = pygame.Rect(sidebar_x, self.padding, sidebar_width, screen_h - self.padding * 2)
         # dentro do chat
         input_h = 40
         chat_input_rect = pygame.Rect(sidebar_rect.left + 12, sidebar_rect.bottom - input_h - 12, sidebar_rect.width - 24, input_h)
@@ -911,15 +1132,51 @@ class ClassicPlayingScreen:
 
         # Input
         input_color = (255, 255, 255) if self.chat_has_focus else (245, 245, 245)
+        border_color = (0, 150, 255) if self.chat_has_focus else BLACK
         pygame.draw.rect(self.screen, input_color, chat_input_rect, border_radius=8)
-        pygame.draw.rect(self.screen, BLACK, chat_input_rect, 1, border_radius=8)
-        txt = self.font_chat_text.render(self.chat_input or "Digite uma mensagem...", True, BLACK if self.chat_input else (120, 120, 120))
+        pygame.draw.rect(self.screen, border_color, chat_input_rect, 2 if self.chat_has_focus else 1, border_radius=8)
+        
+        # Texto do input
+        if self.chat_input:
+            txt = self.font_chat_text.render(self.chat_input, True, BLACK)
+        else:
+            placeholder = "Digite uma mensagem..." if not self.chat_has_focus else "Digite aqui..."
+            txt = self.font_chat_text.render(placeholder, True, (120, 120, 120))
+        
         self.screen.blit(txt, (chat_input_rect.left + 8, chat_input_rect.top + 9))
 
     def _append_message(self, msg):
         self.chat_messages.append(msg)
         if len(self.chat_messages) > 200:
             self.chat_messages = self.chat_messages[-200:]
+    
+    def _start_mission_execution(self):
+        """Inicia a fase de execução da missão"""
+        if hasattr(self, 'resistance_game') and self.resistance_game:
+            estado = self.resistance_game.obter_estado_jogo()
+            if estado['current_mission_team']:
+                self._append_message("[Sistema] Missão iniciada! Membros do time devem votar.")
+                self._append_message(f"[Sistema] Time da missão: {', '.join(estado['current_mission_team'])}")
+    
+    def _check_mission_completion(self):
+        """Verifica se a missão foi completada e processa o resultado"""
+        if hasattr(self, 'resistance_game') and self.resistance_game:
+            resultado = self.resistance_game.calcular_resultado_missao()
+            if resultado:
+                mission_result, details = resultado
+                self._append_message(f"[Sistema] Missão concluída: {mission_result.value}")
+                self._append_message(f"[Sistema] Falhas: {details['fail_count']}/{details['fails_needed']}")
+                
+                # Avançar para próxima missão
+                self.resistance_game.avancar_missao()
+                estado = self.resistance_game.obter_estado_jogo()
+                
+                if estado['game_over']:
+                    winner_text = "RESISTÊNCIA VENCEU!" if estado['winner'] == "Resistência" else "ESPIÕES VENCERAM!"
+                    self._append_message(f"[Sistema] {winner_text}")
+                else:
+                    self._append_message(f"[Sistema] Próxima missão: {estado['mission_number']}/5")
+                    self._append_message(f"[Sistema] Novo líder: {estado['current_leader']}")
 
     # ============== Rede: Cliente TCP ==================
     def _connect(self):
@@ -1126,6 +1383,10 @@ class LobbyScreen:
         pygame.draw.rect(self.screen, BLACK, self.button_rect, 2, border_radius=10)
         btn_label = self.font_button.render("Iniciar jogo", True, BLACK)
         self.screen.blit(btn_label, btn_label.get_rect(center=self.button_rect.center))
+        
+        # Controles (canto inferior direito)
+        controls_text = pygame.font.Font(None, 24).render("ESC: Configurações", True, (200, 200, 200))
+        self.screen.blit(controls_text, (sw - 200, sh - 30))
 
     def _room_url(self):
         return f"{BASE_ROOM_URL}{self.room_id}"
